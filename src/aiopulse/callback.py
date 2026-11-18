@@ -53,6 +53,7 @@ def invoke(
         A callable that accepts the callback's arguments and returns
         a CallbackInvocation containing the callback and supplied arguments.
     """
+
     @functools.wraps(callback)
     def wrapper(
         *args: P.args,
