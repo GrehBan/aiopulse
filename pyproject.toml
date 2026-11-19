@@ -38,6 +38,10 @@ classifiers = [
 
 ]
 
+dependencies = [
+    "typing-extensions>=4.16.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/GrehBan/aiopulse"
 Documentation = "https://grehban.github.io/aiopulse/"
@@ -45,9 +49,6 @@ Repository = "https://github.com/GrehBan/aiopulse"
 Issues = "https://github.com/GrehBan/aiopulse/issues"
 Changelog = "https://github.com/GrehBan/aiopulse/blob/master/CHANGELOG.md"
 
-dependencies = [
-    "typing-extensions>=4.16.0",
-]
 
 [build-system]
 requires = ["hatchling"]
