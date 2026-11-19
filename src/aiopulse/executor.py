@@ -699,8 +699,13 @@ class CallbackExecutor(Generic[RT_co]):
         Marks the cancellations as requested, so they propagate instead of
         being recorded as callback failures. An optional task can be
         excluded, allowing the currently executing callback to finish.
+
+        A task with a cancellation already pending (from fail-fast, or
+        from the task group after a fatal BaseException) is not cancelled
+        again: a second cancellation would interrupt the cleanup it runs
+        on its way out.
         """
         self._cancel_requested = True
         for task in self._live:
-            if task is not exclude:
+            if task is not exclude and not task.cancelling():
                 task.cancel()

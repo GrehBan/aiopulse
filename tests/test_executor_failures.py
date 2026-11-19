@@ -16,7 +16,7 @@ from aiopulse import (
 )
 from aiopulse.callback import CallbackInvocation
 
-from .helpers import collect, unfinished_tasks
+from .helpers import collect, settle, unfinished_tasks
 
 
 async def test_fail_fast_raises_single_failure_as_group() -> None:
@@ -389,4 +389,100 @@ async def test_base_exception_cancels_siblings_without_recording_them() -> (
     assert caught.value.exceptions == (error,)
     assert sibling_cancelled.is_set()
     assert sibling_tasks[0].cancelled()
+    assert not unfinished_tasks()
+
+
+@pytest.mark.parametrize("execution_policy", list(ExecutionPolicy))
+async def test_regression_fail_fast_cancels_each_callback_once(
+    execution_policy: ExecutionPolicy,
+) -> None:
+    failing = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleanup: list[str] = []
+
+    @invoke
+    async def fail() -> int:
+        await failing.wait()
+        raise RuntimeError("fail")
+
+    @invoke
+    async def pending() -> int:
+        try:
+            await asyncio.Event().wait()
+            return 2
+        finally:
+            cleanup_started.set()
+            try:
+                await release_cleanup.wait()
+            except asyncio.CancelledError:
+                cleanup.append("interrupted")
+                raise
+            cleanup.append("finished")
+
+    executor = CallbackExecutor(
+        [pending(), fail()],
+        concurrency=2,
+        execution_policy=execution_policy,
+        exceptions_policy=ExceptionsPolicy.FAIL_FAST,
+    )
+    await executor.aenter()
+    failing.set()
+    await cleanup_started.wait()
+
+    consumer = asyncio.create_task(anext(executor))
+    await settle()
+    assert not consumer.done()
+    release_cleanup.set()
+
+    with pytest.raises(CallbackExceptionGroup) as caught:
+        await consumer
+    assert [str(error) for error in caught.value.exceptions] == ["fail"]
+    assert cleanup == ["finished"]
+    assert not unfinished_tasks()
+
+
+async def test_regression_base_exception_cancels_each_sibling_once() -> None:
+    class FatalCallbackError(BaseException):
+        pass
+
+    error = FatalCallbackError("fatal")
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleanup: list[str] = []
+
+    @invoke
+    async def callback(index: int) -> int:
+        if index == 0:
+            await started.wait()
+            raise error
+        started.set()
+        try:
+            await asyncio.Event().wait()
+            return index
+        finally:
+            cleanup_started.set()
+            try:
+                await release_cleanup.wait()
+            except asyncio.CancelledError:
+                cleanup.append("interrupted")
+                raise
+            cleanup.append("finished")
+
+    executor = CallbackExecutor(
+        [callback(0), callback(1)],
+        concurrency=2,
+        exceptions_policy=ExceptionsPolicy.COLLECT,
+    )
+    consumer = asyncio.create_task(collect(executor))
+    await cleanup_started.wait()
+    await settle()
+    assert not consumer.done()
+    release_cleanup.set()
+
+    with pytest.raises(BaseExceptionGroup) as caught:
+        await consumer
+    assert caught.value.exceptions == (error,)
+    assert cleanup == ["finished"]
     assert not unfinished_tasks()

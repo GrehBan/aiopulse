@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cancel each callback task at most once. A callback already cancelled under
+  `FAIL_FAST`, or by the task group after a fatal `BaseException`, was
+  cancelled again when the executor closed, which interrupted the cleanup it
+  was running (an `await` in its `finally` block).
+
 ## [0.0.4] - 2026-11-18
 
 ### Added

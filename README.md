@@ -123,7 +123,7 @@ async with CallbackExecutor(invocations, concurrency=4) as executor:
         await handle_result(result)
 ```
 
-Leaving the context closes the executor, cancels unfinished callback tasks, and waits for the underlying task group to finish. This ensures that callbacks do not remain running after the consumer has left the block. When no exception is propagating from the block, leaving it also raises the recorded callback failures (see [Exception handling](#exception-handling)).
+Leaving the context closes the executor, cancels unfinished callback tasks, and waits for the underlying task group to finish. Each callback task is cancelled at most once, so a callback can await its cleanup in a `finally` block without a second cancellation interrupting it. This ensures that callbacks do not remain running after the consumer has left the block. When no exception is propagating from the block, leaving it also raises the recorded callback failures (see [Exception handling](#exception-handling)).
 
 If the iterator is consumed until exhaustion without an explicit context manager, the executor closes itself when there are no pending callbacks left. For explicit shutdown, call:
 
