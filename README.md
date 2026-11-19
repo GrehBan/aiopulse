@@ -1,28 +1,27 @@
 # aiopulse
 
-**A lightweight asynchronous callback invocation and execution library for Python.**
+**Lightweight asynchronous callback invocation and bounded-concurrency execution.**
 
-`aiopulse` provides a simple way to prepare asynchronous callback invocations and execute them concurrently with bounded concurrency.
-
-It preserves invocation order when yielding results, regardless of completion order, and provides fail-fast execution semantics with structured task management through `asyncio.TaskGroup`.
+`aiopulse` lets you describe asynchronous callback calls as invocation objects and execute them through a single asynchronous interface. It provides bounded task scheduling, configurable result ordering, and configurable callback exception handling.
 
 ## Features
 
-- **Invocation Factory** — convert asynchronous callbacks into factories that create prepared invocations.
-- **Individual Arguments** — each invocation carries its own positional and keyword arguments.
-- **Bounded Concurrency** — control the maximum number of concurrently executing callbacks.
-- **Ordered Results** — results are yielded in invocation order, regardless of completion order.
-- **Fail-Fast Execution** — callback failures trigger cancellation of other in-flight invocations.
-- **Structured Concurrency** — manage callback task lifetimes using `asyncio.TaskGroup`.
-- **Async Iteration** — consume results naturally using `async for`.
-- **Explicit Lifecycle Management** — manage execution through asynchronous context managers.
-- **Flexible Typing** — preserve callback signatures and support heterogeneous callback signatures and result types.
+- **Explicit invocations** — use `@invoke` to turn an asynchronous function into an invocation factory. Calling the decorated function stores its arguments without executing the callback.
+- **Bounded concurrency** — limit how many callbacks execute at the same time and how many unconsumed results may wait.
+- **Configurable result ordering** — yield results in invocation order or as completed work is observed.
+- **Configurable exception handling** — stop on the first callback failure or continue running and collect failures.
+- **Async iteration** — consume successful callback results with `async for`.
+- **Managed task lifecycle** — use the executor as an asynchronous context manager to ensure pending work is shut down when the consumer exits.
+
+## Requirements
+
+- Python 3.11 or newer.
+
+`aiopulse` uses `asyncio.TaskGroup`, `ExceptionGroup`, and `StrEnum`, which are available in Python 3.11+.
 
 ## Installation
 
-### From source
-
-Clone the repository and install the project dependencies:
+Clone the repository and install its dependencies with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/GrehBan/aiopulse.git
@@ -30,248 +29,26 @@ cd aiopulse
 uv sync
 ```
 
-### Install directly from GitHub
+## Quick start
 
-Using `uv`:
-
-```bash
-uv pip install "git+https://github.com/GrehBan/aiopulse.git"
-```
-
-Using `pip`:
-
-```bash
-pip install "git+https://github.com/GrehBan/aiopulse.git"
-```
-
-To add `aiopulse` as a project dependency with `uv`:
-
-```bash
-uv add "aiopulse @ git+https://github.com/GrehBan/aiopulse.git"
-```
-
-## Concepts
-
-`aiopulse` is built around three main concepts:
-
-- `Callback` — an asynchronous callable.
-- `CallbackInvocation` — a prepared callback invocation containing its arguments.
-- `CallbackExecutor` — an execution engine that manages concurrent invocation execution.
-
-The library separates invocation preparation from execution. Preparing an invocation does not execute the underlying callback.
-
-### Callback
-
-A callback is an asynchronous callable that accepts arguments and returns an awaitable result.
-
-```python
-async def greet(name: str) -> str:
-    return f"Hello, {name}!"
-```
-
-Callbacks can have different signatures and return types. They do not need to share a common parameter specification.
-
-### CallbackInvocation
-
-`CallbackInvocation` encapsulates a callback together with the arguments required to execute it.
-
-```python
-from aiopulse.callback import CallbackInvocation
-
-invocation = CallbackInvocation(
-    callback=greet,
-    args=("Alice",),
-    kwargs={},
-)
-```
-
-A `CallbackInvocation` represents a prepared operation. It can be executed by awaiting it:
-
-```python
-result = await invocation()
-```
-
-Alternatively, invocations can be passed to `CallbackExecutor` for concurrent execution.
-
-### invoke
-
-The `invoke` decorator converts an asynchronous callback into an invocation factory.
-
-```python
-from aiopulse import invoke
-
-
-@invoke
-async def greet(name: str) -> str:
-    return f"Hello, {name}!"
-```
-
-The decorated callable preserves the original callback's parameter signature and creates a `CallbackInvocation` when called.
-
-```python
-invocation = greet("Alice")
-```
-
-This does not execute `greet`. It only prepares the invocation.
-
-Arguments are validated by static type checkers against the original callback signature.
-
-Each invocation stores its own arguments, allowing the same callback to be prepared with different inputs.
-
-```python
-invocations = [
-    greet("Alice"),
-    greet("Bob"),
-    greet("Charlie"),
-]
-```
-
-## CallbackExecutor
-
-`CallbackExecutor` consumes an iterable of prepared `CallbackInvocation` objects and executes them concurrently.
-
-```python
-from aiopulse import CallbackExecutor
-
-executor = CallbackExecutor(
-    invocations,
-    concurrency=3,
-)
-```
-
-The `concurrency` parameter defines the maximum number of callback invocations that can execute simultaneously.
-
-The executor is an asynchronous iterator and can be used with `async for`.
-
-```python
-async with executor:
-    async for result in executor:
-        print(result)
-```
-
-## Execution Model
-
-### Bounded Concurrency
-
-The executor maintains a collection of in-flight tasks and schedules invocations up to the configured concurrency limit.
-
-When a result is consumed, the executor schedules additional invocations to fill available execution slots.
-
-For example, with `concurrency=3`, no more than three callback invocations are scheduled simultaneously.
-
-Setting `concurrency=1` results in sequential execution.
-
-### Ordered Results
-
-Callbacks can complete in a different order from their invocation order.
-
-However, `CallbackExecutor` always yields results in the original invocation order.
-
-Consider the following invocations:
-
-| Invocation | Execution time |
-|---|---:|
-| First | 300 ms |
-| Second | 100 ms |
-| Third | 200 ms |
-
-With `concurrency=3`, the completion order is:
-
-1. Second
-2. Third
-3. First
-
-But the executor yields results in this order:
-
-1. First
-2. Second
-3. Third
-
-This allows concurrent execution while preserving deterministic result consumption.
-
-### Fail-Fast Execution
-
-The executor follows fail-fast semantics.
-
-When an in-flight callback raises an exception:
-
-1. The first observed failure is recorded.
-2. Other in-flight callbacks receive cancellation requests.
-3. No additional invocations are scheduled.
-4. The original failure is propagated to the consumer.
-5. The task group is closed as part of executor cleanup.
-
-Cancellation follows Python's cooperative cancellation model. A callback that suppresses `asyncio.CancelledError` may delay executor shutdown.
-
-### Task Lifecycle
-
-Callback tasks are managed using `asyncio.TaskGroup`.
-
-The executor supports asynchronous context management:
-
-```python
-async with executor:
-    async for result in executor:
-        ...
-```
-
-The context manager ensures that remaining in-flight work is cancelled when execution is interrupted or the consumer exits early.
-
-The executor also closes automatically after normal iteration exhaustion.
-
-## Complete Example
+Decorate an asynchronous function with `@invoke`, create invocation objects by calling the decorated function, and pass those invocations to `CallbackExecutor`.
 
 ```python
 import asyncio
 
-from aiopulse import invoke, CallbackExecutor
+from aiopulse import CallbackExecutor, invoke
 
 
 @invoke
-async def fetch_user(user_id: int) -> str:
-    await asyncio.sleep(0.3)
-    return f"User: {user_id}"
-
-
-@invoke
-async def calculate(a: int, b: int) -> str:
-    await asyncio.sleep(0.1)
-    return f"Result: {a + b}"
-
-
-@invoke
-async def send_notification(
-    recipient: str,
-    message: str,
-    *,
-    urgent: bool = False,
-) -> str:
-    await asyncio.sleep(0.2)
-    priority = "urgent" if urgent else "normal"
-    return f"Notification to {recipient} ({priority}): {message}"
+async def fetch_item(item_id: int) -> str:
+    await asyncio.sleep(1)
+    return f"item-{item_id}"
 
 
 async def main() -> None:
-    # Prepare individual callback invocations.
-    invocations = [
-        fetch_user(42),
-        calculate(10, 20),
-        send_notification(
-            "Alice",
-            "Your report is ready",
-            urgent=True,
-        ),
-        fetch_user(100),
-    ]
+    invocations = (fetch_item(item_id) for item_id in range(5))
 
-    # Create an executor with a concurrency limit of 2.
-    executor = CallbackExecutor(
-        invocations,
-        concurrency=2,
-    )
-
-    # Execute callbacks and consume results in invocation order.
-    async with executor:
+    async with CallbackExecutor(invocations, concurrency=3) as executor:
         async for result in executor:
             print(result)
 
@@ -280,110 +57,279 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Output:
+The executor runs up to three callbacks at a time. Results are yielded in the original invocation order by default, even though the callbacks may finish in a different order.
 
-```text
-User: 42
-Result: 30
-Notification to Alice (urgent): Your report is ready
-User: 100
+## Creating callback invocations
+
+`@invoke` accepts an asynchronous callback and returns a callable with the callback's parameter signature. Calling that callable creates a `CallbackInvocation` containing:
+
+- the original callback;
+- the positional arguments supplied to it;
+- the keyword arguments supplied to it.
+
+The callback is **not executed** when the decorated function is called.
+
+```python
+from aiopulse import CallbackExecutor, invoke
+
+
+@invoke
+async def send_message(user_id: int, message: str) -> None:
+    print(f"Sending to {user_id}: {message}")
+
+
+first = send_message(10, "Hello")
+second = send_message(user_id=20, message="Welcome")
 ```
 
-Although callbacks may complete in a different order, results are always yielded in the order in which their invocations were supplied.
+`first` and `second` describe calls; their callbacks have not run yet.
 
-## Heterogeneous Callbacks
+Pass the resulting invocation objects to `CallbackExecutor`:
 
-Callbacks do not need to share the same parameter signature.
+```python
+async with CallbackExecutor([first, second]) as executor:
+    async for result in executor:
+        ...
+```
+
+The input can be any iterable of invocation objects, including a list, tuple, or generator. The executor consumes the iterable as it schedules work, so a generator can be used to avoid building the entire invocation collection in advance.
+
+Callbacks must be asynchronous callables that return awaitables. `aiopulse` does not move synchronous work to a thread or process pool.
+
+## Executing callbacks
+
+`CallbackExecutor` is both an asynchronous iterator and an asynchronous context manager.
+
+### Async iteration
+
+Use `async for` to receive successful callback results:
+
+```python
+async for result in executor:
+    await handle_result(result)
+```
+
+The executor starts lazily when iteration begins, unless it has already been entered through `async with` or `aenter()`.
+
+### Context management
+
+Prefer `async with` when the loop may finish early, for example because of `break` or an exception in the consumer:
+
+```python
+async with CallbackExecutor(invocations, concurrency=4) as executor:
+    async for result in executor:
+        if should_stop(result):
+            break
+        await handle_result(result)
+```
+
+Leaving the context closes the executor, cancels unfinished callback tasks, and waits for the underlying task group to finish. This ensures that callbacks do not remain running after the consumer has left the block. When no exception is propagating from the block, leaving it also raises the recorded callback failures (see [Exception handling](#exception-handling)).
+
+If the iterator is consumed until exhaustion without an explicit context manager, the executor closes itself when there are no pending callbacks left. For explicit shutdown, call:
+
+```python
+await executor.aclose()
+```
+
+An executor instance represents one execution and cannot be restarted after it has been closed.
+
+## Concurrency
+
+The `concurrency` argument sets the maximum number of callbacks executing at
+the same time. It defaults to `1` and must be greater than or equal to `1`.
+`buffer_size` sets additional capacity for pending callbacks, including
+completed results that have not yet been consumed. It defaults to `0` and
+cannot be negative.
+
+```python
+async with CallbackExecutor(
+    invocations,
+    concurrency=10,
+    buffer_size=5,
+) as executor:
+    async for result in executor:
+        ...
+```
+
+The executor initially schedules up to the configured concurrency limit.
+It schedules more invocations only while it is being iterated: when a result
+is consumed, and when a callback finishes while the consumer waits for the
+next result. While the consumer is busy between results, finished callbacks
+are not replaced.
+
+At most `concurrency + buffer_size` tasks can be pending. A finished callback
+occupies a pending slot until iteration reaches it: its result is yielded, or
+its failed outcome is skipped. Under `SEQUENTIAL` this includes results
+waiting behind an earlier invocation. Buffer capacity does not increase the
+number of callbacks executing simultaneously.
+
+With `concurrency=1`, callbacks execute one at a time. With a value greater
+than `1`, multiple asynchronous callbacks can be in progress concurrently.
+
+## Result ordering
+
+Choose an `ExecutionPolicy` with the `execution_policy` argument.
+
+### `ExecutionPolicy.SEQUENTIAL` (default)
+
+Results are yielded in the same order as the input invocations.
+
+This policy controls **result ordering**, not whether callbacks may run concurrently. When `concurrency` is greater than `1`, later callbacks can start and finish while an earlier callback is still running, but their results are held until earlier results have been yielded.
+
+```python
+async with CallbackExecutor(
+    invocations,
+    concurrency=5,
+    execution_policy=ExecutionPolicy.SEQUENTIAL,
+) as executor:
+    async for result in executor:
+        print(result)
+```
+
+### `ExecutionPolicy.FIRST_COMPLETED`
+
+Results are yielded as soon as the executor observes that their callbacks have completed, regardless of their original input position.
+
+```python
+async with CallbackExecutor(
+    invocations,
+    concurrency=5,
+    execution_policy=ExecutionPolicy.FIRST_COMPLETED,
+) as executor:
+    async for result in executor:
+        print(result)
+```
+
+If several tasks have already completed when the executor selects the next result, they are yielded in the order in which the executor observed their completion.
+
+## Exception handling
+
+Choose an `ExceptionsPolicy` with the `exceptions_policy` argument.
+
+### `ExceptionsPolicy.FAIL_FAST` (default)
+
+When a callback fails (it raises an `Exception` or ends with a cancellation the executor did not request):
+
+1. The failure is recorded.
+2. The executor cancels the other unfinished callback tasks.
+3. No further invocations are scheduled.
+4. On the next request for a result, or when the context is left, the executor closes: it waits for the cancelled callbacks to finish and then raises the recorded failures in a `CallbackExceptionGroup`. Results that were ready but not yet yielded are not returned.
+
+This policy stops further work after the first observed callback failure. Because callbacks run concurrently, another callback may also fail before shutdown completes; those failures are recorded as well. The callbacks that the executor cancels are not failures.
+
+### `ExceptionsPolicy.COLLECT`
+
+When a callback fails, the executor records the failure but does not cancel other callbacks because of it. It continues scheduling and executing the remaining invocations.
+
+A failed invocation does not produce a result, so the iterator yields only successful callback results. The recorded failures are raised when the executor closes: after the last result, or when the context is left earlier.
+
+### How failures are raised
+
+In both policies, recorded failures are raised together in one
+`CallbackExceptionGroup`, even when only one callback failed. It is an
+`ExceptionGroup` subtype that holds the original exceptions, in the order the
+executor observed them, so `except*` works as usual. Its `failures` attribute
+holds one `CallbackFailure` record per exception, in the same order: the
+zero-based invocation index, the original invocation and the exception.
+Subgroups created by `split()`, `subgroup()` and `except*` keep the records
+of their exceptions.
+
+A callback that ends with a cancellation the executor did not request, for
+example by awaiting a cancelled future or task or by cancelling itself, is
+recorded as a `CallbackCancelledError` failure, with the original
+`asyncio.CancelledError` as its `__cause__`. It is therefore never mistaken
+for a cancellation of the code consuming the results. Callbacks that the
+executor cancels itself, on close or under `FAIL_FAST`, are not failures.
+
+An exception raised inside the `async with` block, including the `async for`
+body, takes precedence: it propagates unchanged and the recorded callback
+failures are discarded.
 
 For example:
 
 ```python
-@invoke
-async def get_user(user_id: int) -> User:
-    ...
+from aiopulse import CallbackExceptionGroup, CallbackExecutor, ExceptionsPolicy
 
 
-@invoke
-async def calculate(a: float, b: float) -> int:
-    ...
-
-
-@invoke
-async def is_available(resource: str) -> bool:
-    ...
+try:
+    async with CallbackExecutor(
+        invocations,
+        concurrency=4,
+        exceptions_policy=ExceptionsPolicy.COLLECT,
+    ) as executor:
+        async for result in executor:
+            print(result)
+except CallbackExceptionGroup as group:
+    for failure in group.failures:
+        print(f"Invocation {failure.index} failed: {failure.exception!r}")
 ```
 
-All three can be included in the same executor.
-
-Their arguments are checked independently, while the executor manages their execution uniformly.
-
-The executor can also be parameterized with a common result type or a union of possible result types:
+Failures can also be handled by type with `except*`:
 
 ```python
-Result = User | int | bool
-
-invocations = [
-    get_user(42),
-    calculate(10.5, 20.5),
-    is_available("worker"),
-]
-
-executor: CallbackExecutor[Result] = CallbackExecutor(
-    invocations,
-    concurrency=3,
-)
+try:
+    async with CallbackExecutor(invocations, concurrency=4) as executor:
+        async for result in executor:
+            print(result)
+except* TimeoutError as group:
+    print(f"{len(group.exceptions)} callback(s) timed out")
 ```
 
-This preserves useful result typing without requiring callbacks to have identical signatures.
+Because `ExceptionGroup` is a Python 3.11 feature, it is available under the minimum supported Python version.
 
-## API Reference
+## API reference
 
-### `CallbackInvocation`
+### `invoke(callback)`
 
-| Member | Description |
-|---|---|
-| `callback` | The asynchronous callback to execute. |
-| `args` | Positional arguments for the callback. |
-| `kwargs` | Keyword arguments for the callback. |
-| `__call__()` | Execute the prepared invocation asynchronously. |
+Decorator that converts an asynchronous callback into an invocation factory.
 
-### `invoke`
+- Preserves the callback's parameter signature for callers and type checkers.
+- Calling the decorated function creates an invocation object.
+- Does not execute the callback.
 
-| Parameter | Description |
-|---|---|
-| `callback` | The asynchronous callback to wrap. |
+### `CallbackExecutor(invocations, concurrency=1, buffer_size=0, execution_policy=ExecutionPolicy.SEQUENTIAL, exceptions_policy=ExceptionsPolicy.FAIL_FAST)`
 
-Returns a callable that preserves the callback's parameter signature and creates `CallbackInvocation` objects.
+Executes an iterable of callback invocations and yields successful results.
 
-### `CallbackExecutor`
+| Argument | Description |
+| --- | --- |
+| `invocations` | Iterable of callback invocation objects to execute. |
+| `concurrency` | Maximum number of callbacks executing simultaneously. Must be at least `1`. |
+| `buffer_size` | Additional pending-task capacity, including completed but unconsumed tasks. Must be non-negative. |
+| `execution_policy` | Controls the order in which successful results are yielded. |
+| `exceptions_policy` | Controls how callback failures affect execution. |
 
-| Parameter / Member | Description |
-|---|---|
-| `invocations` | Iterable of prepared callback invocations. |
-| `concurrency` | Maximum number of concurrently executing callbacks. |
-| `entered` | Indicates whether the underlying task group has been entered. |
-| `closed` | Indicates whether the executor is closed. |
-| `exhausted` | Indicates whether the invocation iterator is exhausted. |
-| `aenter()` | Enter the executor and start scheduling invocations. |
-| `aclose()` | Cancel remaining tasks and close the executor. |
-| `__aiter__()` | Return the executor as an asynchronous iterator. |
-| `__anext__()` | Retrieve the next result in invocation order. |
+`CallbackExecutor` implements the asynchronous iterator protocol (`__aiter__` and `__anext__`) and asynchronous context manager protocol (`__aenter__` and `__aexit__`). It also exposes `aenter()` and `aclose()` for explicit lifecycle management.
 
-## Design Principles
+### `ExecutionPolicy`
 
-`aiopulse` is built around a few core principles:
+- `ExecutionPolicy.SEQUENTIAL` — yield results in invocation order.
+- `ExecutionPolicy.FIRST_COMPLETED` — yield results as completed work is observed.
 
-- **Separation of preparation and execution:** creating an invocation does not execute the callback.
-- **Independent invocations:** every callback invocation owns its arguments and execution state.
-- **Bounded concurrency:** concurrent execution is explicitly configurable.
-- **Deterministic consumption:** results preserve invocation order.
-- **Structured task management:** callback tasks are managed through `asyncio.TaskGroup`.
-- **Minimal abstraction:** the API builds on native Python callables, asynchronous iteration, and context management.
+### `ExceptionsPolicy`
 
-`aiopulse` aims to provide a small and reusable foundation for applications and libraries that need controlled concurrent execution of asynchronous callables.
+- `ExceptionsPolicy.FAIL_FAST` — cancel unfinished callbacks and stop scheduling after the first recorded failure.
+- `ExceptionsPolicy.COLLECT` — continue executing callbacks and raise recorded failures when execution shuts down.
 
-It does not impose a particular callback registration system, application architecture, or execution domain. Consumers are free to prepare invocations from their own registries, event systems, plugin managers, or other sources.
+### `CallbackExceptionGroup`
 
-## LICENSE
+`ExceptionGroup` subtype raised for callback failures. Its `failures` attribute is a tuple of `CallbackFailure` records, one per member exception and in the same order. Its type parameters are the member exception type and the callback result type.
 
-MIT.
+### `CallbackFailure`
+
+Frozen record of one failed invocation: `index` (zero-based position in the input), `invocation` (the original invocation, which can be inspected or retried) and `exception` (the exception raised by the callback, or a `CallbackCancelledError`).
+
+### `CallbackCancelledError`
+
+`Exception` recorded when a callback ends with a cancellation that the executor did not request. The original `asyncio.CancelledError` is its `__cause__`.
+
+## Notes and limitations
+
+- Only asynchronous callbacks that return awaitables are supported.
+- The limits apply to asyncio tasks in the running event loop; `aiopulse` is not a thread or process pool.
+- The exception policy handles callback failures: ordinary `Exception` instances and cancellations that the executor did not request (`CallbackCancelledError`). `KeyboardInterrupt` and `SystemExit` are re-raised by asyncio out of the event loop. Any other `BaseException` subclass aborts the execution: the task group cancels the remaining callbacks and the exception is raised in a `BaseExceptionGroup`.
+- The task that first enters the executor (the `async with` block, `aenter()`, or the first `anext()`) owns its task group. When a callback raises such a `BaseException`, the task group also cancels that task, so enter and consume an executor from the same task.
+- Callback failures are raised by the executor, not yielded as result objects.
+- Under `COLLECT`, successful results may already have been yielded before the collected callback failures are raised at shutdown.
+- Under `FAIL_FAST`, concurrent callbacks may produce more than one recorded exception before shutdown completes.
+- The executor is a single-use asynchronous iterator. Create a new `CallbackExecutor` for a new execution.

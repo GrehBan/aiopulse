@@ -9,10 +9,63 @@ from typing import Any, Generic, ParamSpec, TypeAlias
 
 from typing_extensions import TypeVar
 
+from aiopulse._sentinel import (
+    MISSING,
+    _Sentinel,  # pyright: ignore[reportPrivateUsage]
+)
+
 RT = TypeVar("RT", default=object)
 RT_co = TypeVar("RT_co", covariant=True, default=object)
 P = ParamSpec("P")
 Callback: TypeAlias = Callable[P, Awaitable[RT]]
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackOutcome(Generic[RT_co]):
+    """Represents the outcome of a single callback execution.
+
+    Attributes:
+        result: The result returned by the successful callback, or a
+            sentinel indicating missing/failed state.
+    """
+
+    result: RT_co | _Sentinel = MISSING
+
+    def get_result(self) -> RT_co:
+        """Get outcome result or raise an error if execution failed.
+
+        Returns:
+            The successful callback result.
+
+        Raises:
+            RuntimeError: If the outcome has no result because the
+                callback failed; the executor records that failure
+                separately.
+        """
+        if self.result is MISSING:
+            raise RuntimeError(
+                "Callback execution failed without an exception"
+            )
+        assert not isinstance(self.result, _Sentinel)
+        return self.result
+
+
+@dataclass(frozen=True, slots=True)
+class CallbackFailure(Generic[RT_co]):
+    """Represent a failed callback invocation with its execution context.
+
+    Attributes:
+        index: Zero-based position of the invocation in the input iterable.
+        invocation: Original invocation handle, allowing the failed callback
+            to be inspected or retried.
+        exception: Original exception raised by the callback, or a
+            CallbackCancelledError when the callback ended with a
+            cancellation that the executor did not request.
+    """
+
+    index: int
+    invocation: CallbackInvocation[..., RT_co]
+    exception: Exception
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +106,7 @@ def invoke(
         A callable that accepts the callback's arguments and returns
         a CallbackInvocation containing the callback and supplied arguments.
     """
+
     @functools.wraps(callback)
     def wrapper(
         *args: P.args,

@@ -1,6 +1,6 @@
 [project]
 name = "aiopulse"
-version = "0.0.1"
+version = "0.0.4"
 description = "A lightweight asynchronous callback invocation and execution library for Python."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,6 @@ maintainers = [
     { name = "GrehBan", email = "maximfeedback19@gmail.com" },
 ]
 dependencies = [
-    "frozenlist>=1.8.0",
     "typing-extensions>=4.16.0",
 ]
 
@@ -32,7 +31,16 @@ dev = [
     "pyright>=1.1.414",
     "ruff>=0.17.5",
 ]
-
+test = [
+    "hypothesis>=6.170.14",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
+    "pytest-cov>=7.1.0",
+    "pytest-html>=4.2.0",
+    "pytest-mock>=3.17.0",
+    "pytest-mypy>=1.1.0",
+    "pytest-timeout>=2.4.0",
+]
 
 [tool.ruff]
 line-length = 79
@@ -108,6 +116,13 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D", # docstrings are not required in tests
+    "PLR2004", # magic values are expected in asserts
+]
+
+
 [tool.mypy]
 python_version = "3.11"
 mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
@@ -141,3 +156,41 @@ typeCheckingMode = "strict"
 reportUnknownArgumentType = false
 reportUnknownMemberType = false
 reportUnknownVariableType = false
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# A stuck test fails instead of hanging the run (pytest-timeout).
+timeout = 30
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--cov=aiopulse",
+    "--cov-branch",
+    "--cov-report=term-missing",
+]
+markers = [
+    "typing: static type checks",
+]
+filterwarnings = ["error"]
+
+
+[tool.coverage.run]
+branch = true
+source = ["aiopulse"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+fail_under = 98
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.$",
+]
