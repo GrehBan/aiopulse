@@ -1,6 +1,6 @@
 [project]
 name = "aiopulse-py"
-version = "0.0.4"
+version = "0.0.5"
 description = "A lightweight asynchronous callback invocation and execution library for Python."
 readme = "README.md"
 license = "MIT"
