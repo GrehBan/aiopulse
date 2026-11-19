@@ -1,6 +1,6 @@
 [project]
 name = "aiopulse"
-version = "0.0.2"
+version = "0.0.4"
 description = "A lightweight asynchronous callback invocation and execution library for Python."
 readme = "README.md"
 license = "MIT"
@@ -39,6 +39,7 @@ test = [
     "pytest-html>=4.2.0",
     "pytest-mock>=3.17.0",
     "pytest-mypy>=1.1.0",
+    "pytest-timeout>=2.4.0",
 ]
 
 [tool.ruff]
@@ -164,6 +165,8 @@ reportPrivateUsage = false
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# A stuck test fails instead of hanging the run (pytest-timeout).
+timeout = 30
 addopts = [
     "-ra",
     "--strict-markers",

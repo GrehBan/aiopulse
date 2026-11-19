@@ -5,7 +5,7 @@ import dataclasses
 import pytest
 
 from aiopulse._sentinel import MISSING
-from aiopulse.executor.executor import CallbackOutcome
+from aiopulse.callback import CallbackOutcome
 
 
 def test_successful_outcome_returns_original_result() -> None:

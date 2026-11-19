@@ -7,7 +7,7 @@
 ## Features
 
 - **Explicit invocations** — use `@invoke` to turn an asynchronous function into an invocation factory. Calling the decorated function stores its arguments without executing the callback.
-- **Bounded concurrency** — control how many callback tasks the executor schedules at a time.
+- **Bounded concurrency** — limit how many callbacks execute at the same time and how many unconsumed results may wait.
 - **Configurable result ordering** — yield results in invocation order or as completed work is observed.
 - **Configurable exception handling** — stop on the first callback failure or continue running and collect failures.
 - **Async iteration** — consume successful callback results with `async for`.
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-The executor schedules up to three callback invocations at a time. Results are yielded in the original invocation order by default, even though the callbacks may finish in a different order.
+The executor runs up to three callbacks at a time. Results are yielded in the original invocation order by default, even though the callbacks may finish in a different order.
 
 ## Creating callback invocations
 
@@ -80,9 +80,9 @@ async def send_message(user_id: int, message: str) -> None:
 
 first = send_message(10, "Hello")
 second = send_message(user_id=20, message="Welcome")
-
-# `first` and `second` describe calls. Their callbacks have not run yet.
 ```
+
+`first` and `second` describe calls; their callbacks have not run yet.
 
 Pass the resulting invocation objects to `CallbackExecutor`:
 
@@ -123,7 +123,7 @@ async with CallbackExecutor(invocations, concurrency=4) as executor:
         await handle_result(result)
 ```
 
-Leaving the context closes the executor, cancels pending callback tasks, and waits for the underlying task group to finish. This ensures that callbacks do not remain running after the consumer has left the block.
+Leaving the context closes the executor, cancels unfinished callback tasks, and waits for the underlying task group to finish. This ensures that callbacks do not remain running after the consumer has left the block. When no exception is propagating from the block, leaving it also raises the recorded callback failures (see [Exception handling](#exception-handling)).
 
 If the iterator is consumed until exhaustion without an explicit context manager, the executor closes itself when there are no pending callbacks left. For explicit shutdown, call:
 
@@ -135,17 +135,36 @@ An executor instance represents one execution and cannot be restarted after it h
 
 ## Concurrency
 
-The `concurrency` argument sets the maximum number of callback tasks that may be pending in the executor at once. It defaults to `1` and must be greater than or equal to `1`.
+The `concurrency` argument sets the maximum number of callbacks executing at
+the same time. It defaults to `1` and must be greater than or equal to `1`.
+`buffer_size` sets additional capacity for pending callbacks, including
+completed results that have not yet been consumed. It defaults to `0` and
+cannot be negative.
 
 ```python
-async with CallbackExecutor(invocations, concurrency=10) as executor:
+async with CallbackExecutor(
+    invocations,
+    concurrency=10,
+    buffer_size=5,
+) as executor:
     async for result in executor:
         ...
 ```
 
-The executor initially schedules up to the configured limit and schedules more invocations as results are retrieved. In ordered mode, a completed result that is waiting behind an earlier invocation still occupies a pending slot until it is yielded.
+The executor initially schedules up to the configured concurrency limit.
+It schedules more invocations only while it is being iterated: when a result
+is consumed, and when a callback finishes while the consumer waits for the
+next result. While the consumer is busy between results, finished callbacks
+are not replaced.
 
-With `concurrency=1`, callbacks execute one at a time. With a value greater than `1`, multiple asynchronous callbacks can be in progress concurrently.
+At most `concurrency + buffer_size` tasks can be pending. A finished callback
+occupies a pending slot until iteration reaches it: its result is yielded, or
+its failed outcome is skipped. Under `SEQUENTIAL` this includes results
+waiting behind an earlier invocation. Buffer capacity does not increase the
+number of callbacks executing simultaneously.
+
+With `concurrency=1`, callbacks execute one at a time. With a value greater
+than `1`, multiple asynchronous callbacks can be in progress concurrently.
 
 ## Result ordering
 
@@ -181,7 +200,7 @@ async with CallbackExecutor(
         print(result)
 ```
 
-If multiple pending tasks are already complete when the executor selects the next result, it selects the first completed task in its pending order (which follows the invocation order for tasks that are still pending).
+If several tasks have already completed when the executor selects the next result, they are yielded in the order in which the executor observed their completion.
 
 ## Exception handling
 
@@ -189,32 +208,47 @@ Choose an `ExceptionsPolicy` with the `exceptions_policy` argument.
 
 ### `ExceptionsPolicy.FAIL_FAST` (default)
 
-When a callback raises an `Exception`:
+When a callback fails (it raises an `Exception` or ends with a cancellation the executor did not request):
 
-1. The exception is recorded.
-2. The executor cancels the other pending callback tasks.
+1. The failure is recorded.
+2. The executor cancels the other unfinished callback tasks.
 3. No further invocations are scheduled.
-4. The executor waits for the task group to shut down and then propagates the recorded callback exception or exceptions.
+4. On the next request for a result, or when the context is left, the executor closes: it waits for the cancelled callbacks to finish and then raises the recorded failures in a `CallbackExceptionGroup`. Results that were ready but not yet yielded are not returned.
 
-This policy stops further work after the first observed callback failure. Because callbacks run concurrently, another callback may also fail before shutdown completes; those failures are recorded as well.
+This policy stops further work after the first observed callback failure. Because callbacks run concurrently, another callback may also fail before shutdown completes; those failures are recorded as well. The callbacks that the executor cancels are not failures.
 
 ### `ExceptionsPolicy.COLLECT`
 
-When a callback raises an `Exception`, the executor records the failure but does not cancel other callbacks because of it. It continues scheduling and executing the remaining invocations.
+When a callback fails, the executor records the failure but does not cancel other callbacks because of it. It continues scheduling and executing the remaining invocations.
 
-A failed invocation does not produce a result, so the iterator yields only successful callback results. After all invocations have been processed, the recorded failures are propagated during shutdown.
+A failed invocation does not produce a result, so the iterator yields only successful callback results. The recorded failures are raised when the executor closes: after the last result, or when the context is left earlier.
 
 ### How failures are raised
 
-In both policies, the propagation format depends on the number of recorded callback exceptions:
+In both policies, recorded failures are raised together in one
+`CallbackExceptionGroup`, even when only one callback failed. It is an
+`ExceptionGroup` subtype that holds the original exceptions, in the order the
+executor observed them, so `except*` works as usual. Its `failures` attribute
+holds one `CallbackFailure` record per exception, in the same order: the
+zero-based invocation index, the original invocation and the exception.
+Subgroups created by `split()`, `subgroup()` and `except*` keep the records
+of their exceptions.
 
-- One exception is raised directly as its original exception type.
-- Two or more exceptions are raised in an `ExceptionGroup`.
+A callback that ends with a cancellation the executor did not request, for
+example by awaiting a cancelled future or task or by cancelling itself, is
+recorded as a `CallbackCancelledError` failure, with the original
+`asyncio.CancelledError` as its `__cause__`. It is therefore never mistaken
+for a cancellation of the code consuming the results. Callbacks that the
+executor cancels itself, on close or under `FAIL_FAST`, are not failures.
+
+An exception raised inside the `async with` block, including the `async for`
+body, takes precedence: it propagates unchanged and the recorded callback
+failures are discarded.
 
 For example:
 
 ```python
-from aiopulse import CallbackExecutor, ExceptionsPolicy
+from aiopulse import CallbackExceptionGroup, CallbackExecutor, ExceptionsPolicy
 
 
 try:
@@ -225,12 +259,20 @@ try:
     ) as executor:
         async for result in executor:
             print(result)
-except ExceptionGroup as group:
-    for error in group.exceptions:
-        print(f"Callback failed: {error!r}")
-except Exception as error:
-    # A single callback exception is propagated directly.
-    print(f"Callback failed: {error!r}")
+except CallbackExceptionGroup as group:
+    for failure in group.failures:
+        print(f"Invocation {failure.index} failed: {failure.exception!r}")
+```
+
+Failures can also be handled by type with `except*`:
+
+```python
+try:
+    async with CallbackExecutor(invocations, concurrency=4) as executor:
+        async for result in executor:
+            print(result)
+except* TimeoutError as group:
+    print(f"{len(group.exceptions)} callback(s) timed out")
 ```
 
 Because `ExceptionGroup` is a Python 3.11 feature, it is available under the minimum supported Python version.
@@ -245,16 +287,17 @@ Decorator that converts an asynchronous callback into an invocation factory.
 - Calling the decorated function creates an invocation object.
 - Does not execute the callback.
 
-### `CallbackExecutor(invocations, concurrency=1, execution_policy=ExecutionPolicy.SEQUENTIAL, exceptions_policy=ExceptionsPolicy.FAIL_FAST)`
+### `CallbackExecutor(invocations, concurrency=1, buffer_size=0, execution_policy=ExecutionPolicy.SEQUENTIAL, exceptions_policy=ExceptionsPolicy.FAIL_FAST)`
 
 Executes an iterable of callback invocations and yields successful results.
 
 | Argument | Description |
 | --- | --- |
 | `invocations` | Iterable of callback invocation objects to execute. |
-| `concurrency` | Maximum number of pending callback tasks. Must be at least `1`. |
+| `concurrency` | Maximum number of callbacks executing simultaneously. Must be at least `1`. |
+| `buffer_size` | Additional pending-task capacity, including completed but unconsumed tasks. Must be non-negative. |
 | `execution_policy` | Controls the order in which successful results are yielded. |
-| `exceptions_policy` | Controls how callback exceptions affect execution and when they are propagated. |
+| `exceptions_policy` | Controls how callback failures affect execution. |
 
 `CallbackExecutor` implements the asynchronous iterator protocol (`__aiter__` and `__anext__`) and asynchronous context manager protocol (`__aenter__` and `__aexit__`). It also exposes `aenter()` and `aclose()` for explicit lifecycle management.
 
@@ -265,14 +308,27 @@ Executes an iterable of callback invocations and yields successful results.
 
 ### `ExceptionsPolicy`
 
-- `ExceptionsPolicy.FAIL_FAST` — cancel pending work after the first observed callback failure.
-- `ExceptionsPolicy.COLLECT` — continue executing callbacks and propagate recorded failures when execution shuts down.
+- `ExceptionsPolicy.FAIL_FAST` — cancel unfinished callbacks and stop scheduling after the first recorded failure.
+- `ExceptionsPolicy.COLLECT` — continue executing callbacks and raise recorded failures when execution shuts down.
+
+### `CallbackExceptionGroup`
+
+`ExceptionGroup` subtype raised for callback failures. Its `failures` attribute is a tuple of `CallbackFailure` records, one per member exception and in the same order. Its type parameters are the member exception type and the callback result type.
+
+### `CallbackFailure`
+
+Frozen record of one failed invocation: `index` (zero-based position in the input), `invocation` (the original invocation, which can be inspected or retried) and `exception` (the exception raised by the callback, or a `CallbackCancelledError`).
+
+### `CallbackCancelledError`
+
+`Exception` recorded when a callback ends with a cancellation that the executor did not request. The original `asyncio.CancelledError` is its `__cause__`.
 
 ## Notes and limitations
 
 - Only asynchronous callbacks that return awaitables are supported.
-- The concurrency limit applies to callback tasks pending in the executor; it is not a thread or process pool.
-- Callback failures raised as ordinary `Exception` instances are handled by the configured exception policy. Cancellation and other `BaseException` subclasses are handled by asyncio and `TaskGroup`, not collected as ordinary callback failures.
+- The limits apply to asyncio tasks in the running event loop; `aiopulse` is not a thread or process pool.
+- The exception policy handles callback failures: ordinary `Exception` instances and cancellations that the executor did not request (`CallbackCancelledError`). `KeyboardInterrupt` and `SystemExit` are re-raised by asyncio out of the event loop. Any other `BaseException` subclass aborts the execution: the task group cancels the remaining callbacks and the exception is raised in a `BaseExceptionGroup`.
+- The task that first enters the executor (the `async with` block, `aenter()`, or the first `anext()`) owns its task group. When a callback raises such a `BaseException`, the task group also cancels that task, so enter and consume an executor from the same task.
 - Callback failures are raised by the executor, not yielded as result objects.
 - Under `COLLECT`, successful results may already have been yielded before the collected callback failures are raised at shutdown.
 - Under `FAIL_FAST`, concurrent callbacks may produce more than one recorded exception before shutdown completes.

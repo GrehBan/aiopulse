@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "aiopulse"
-version = "0.0.2"
+version = "0.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "typing-extensions" },
@@ -28,6 +28,7 @@ test = [
     { name = "pytest-html" },
     { name = "pytest-mock" },
     { name = "pytest-mypy" },
+    { name = "pytest-timeout" },
 ]
 
 [package.metadata]
@@ -47,6 +48,7 @@ test = [
     { name = "pytest-html", specifier = ">=4.2.0" },
     { name = "pytest-mock", specifier = ">=3.17.0" },
     { name = "pytest-mypy", specifier = ">=1.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
 ]
 
 [[package]]
@@ -835,6 +837,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/83/c4/a6970cb4cdb1e8f28220b0de998b6212fa3255a52f38b88794cdc96389cb/pytest_mypy-1.1.0.tar.gz", hash = "sha256:b9f4237c0311eec507c48986dde2d776f399c98fdb92dae5c93f96c19bcae0e4", size = 16666, upload-time = "2026-10-22T19:38:25.439Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/83/0ee8e5dd1fb69b1429a251cb7b6e52882f7e14b14b01fa2a5f1d6fc141d4/pytest_mypy-1.1.0-py3-none-any.whl", hash = "sha256:4f0e3cc7be0825188a427811a8fd0fd83afc010b0ea167a273180b81fbd7d8b5", size = 8610, upload-time = "2026-10-22T19:38:24.554Z" },
+]
+
+[[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973, upload-time = "2025-05-05T19:44:34.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382, upload-time = "2025-05-05T19:44:33.502Z" },
 ]
 
 [[package]]

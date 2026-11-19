@@ -4,7 +4,8 @@ from collections.abc import Iterable
 from typing import assert_type
 
 from aiopulse import CallbackExecutor, invoke
-from aiopulse.callback import CallbackInvocation
+from aiopulse.callback import CallbackFailure, CallbackInvocation
+from aiopulse.executor import CallbackExceptionGroup
 
 
 class Animal:
@@ -46,3 +47,13 @@ async def check_executor_types() -> None:
     dog_executor = CallbackExecutor(dogs)
     accept_animal_executor(dog_executor)
     assert_type(await anext(dog_executor), Dog)
+
+
+def check_exception_group_types() -> None:
+    failure = CallbackFailure(0, identify(1), LookupError("missing"))
+    group = CallbackExceptionGroup("failures", (failure,))
+    assert_type(group, CallbackExceptionGroup[Exception, str])
+    assert_type(group.failures, tuple[CallbackFailure[str], ...])
+
+    subgroup = group.derive([LookupError("missing")])
+    assert_type(subgroup, CallbackExceptionGroup[LookupError, str])

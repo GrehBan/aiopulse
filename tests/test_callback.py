@@ -36,9 +36,10 @@ async def test_callback_invocation_stores_and_forwards_arguments() -> None:
 async def test_callback_invocation_supports_none_and_repeated_calls() -> None:
     count = 0
 
-    async def callback() -> None:
+    async def callback() -> int | None:
         nonlocal count
         count += 1
+        return None
 
     invocation = CallbackInvocation(callback, (), {})
 
@@ -118,7 +119,7 @@ async def test_invoke_accepts_positional_keyword_and_mixed_arguments(
 @pytest.mark.asyncio
 async def test_invoke_supports_no_parameters_and_result_kinds() -> None:
     @invoke
-    async def no_parameters() -> None:
+    async def no_parameters() -> int | None:
         return None
 
     @invoke
