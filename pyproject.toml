@@ -1,5 +1,5 @@
 [project]
-name = "aiopulse"
+name = "aiopulse-py"
 version = "0.0.4"
 description = "A lightweight asynchronous callback invocation and execution library for Python."
 readme = "README.md"
