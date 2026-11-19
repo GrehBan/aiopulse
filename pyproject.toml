@@ -15,9 +15,6 @@ dependencies = [
     "typing-extensions>=4.16.0",
 ]
 
-[project.scripts]
-aiopulse = "aiopulse:main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
