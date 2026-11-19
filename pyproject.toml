@@ -11,6 +11,40 @@ authors = [
 maintainers = [
     { name = "GrehBan", email = "maximfeedback19@gmail.com" },
 ]
+keywords = [
+    "asyncio",
+    "async",
+    "callbacks",
+    "callback registry",
+    "callback execution",
+    "concurrency",
+    "bounded concurrency",
+    "async iterator",
+    "task scheduling",
+    "event-driven",
+]
+classifiers = [
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+
+]
+
+[project.urls]
+Homepage = "https://github.com/GrehBan/aiopulse"
+Documentation = "https://grehban.github.io/aiopulse/"
+Repository = "https://github.com/GrehBan/aiopulse"
+Issues = "https://github.com/GrehBan/aiopulse/issues"
+Changelog = "https://github.com/GrehBan/aiopulse/blob/master/CHANGELOG.md"
+
 dependencies = [
     "typing-extensions>=4.16.0",
 ]
